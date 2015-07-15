@@ -27,6 +27,30 @@ end
 
 
 
+## Extraction
+#############################
+
+##
+# Extracts the information from the rental and cars data to prepare for billing
+# 
+# param rental the data specifically about the current rental
+# param cars the data about all available cars
+# return the rentalInfo that was extracted, with members: id, nbDays, pricePerDay, pricePerKm, nbKms, deductibleOption
+def extractRentalInfo(rental, cars)
+  rentalInfo = {};
+  rentalInfo["id"] = rental["id"]
+  # both first and last days are billed
+  rentalInfo["nbDays"] = (Date.parse(rental["end_date"]) - Date.parse(rental["start_date"])).to_i + 1; 
+  rentalInfo["pricePerDay"] = cars[rental["car_id"]]["price_per_day"];
+  rentalInfo["pricePerKm"] = cars[rental["car_id"]]["price_per_km"];
+  rentalInfo["nbKms"] = rental["distance"];
+  rentalInfo["deductibleOption"] = rental["deductible_reduction"];
+  rentalInfo;
+end
+
+
+
+
 ## Billing
 #############################
 
@@ -135,6 +159,68 @@ def getActions(price, comm, options)
   actions;  
 end
 
+##
+# Extracts rental data and computes billing
+#
+# param rental the data specifically about the current rental
+# param cars the data about all available cars
+# return the rentalInfo that was extracted and computed, with members: id, nbDays, pricePerDay, pricePerKm, nbKms, deductibleOption, price, commission, options, actions
+def processRental(rental, cars)
+  rentalInfo = extractRentalInfo(rental, cars);
+  
+  # generating billing information
+  rentalInfo["price"] = getPrice(rentalInfo["nbDays"], rentalInfo["pricePerDay"], rentalInfo["pricePerKm"], rentalInfo["nbKms"]);
+  rentalInfo["commission"] = getCommission(rentalInfo["price"], rentalInfo["nbDays"]);
+  rentalInfo["options"] = getOptions(rentalInfo["nbDays"], rentalInfo["deductibleOption"]);
+  rentalInfo["actions"] = getActions(rentalInfo["price"], rentalInfo["commission"], rentalInfo["options"]);
+  rentalInfo;
+end
+
+def getRentalModActions(initRentalInfo, newRentalInfo)
+  actions = [];
+    
+  # we first extract data and store it in Hashes, mapped by the actor
+  initActions = {};
+  for initAction in initRentalInfo["actions"]
+    initActions[initAction["who"]] = initAction;
+  end
+  
+  # comparing the initial actions and the expected new rental, computing the difference
+  for newAction in newRentalInfo["actions"]
+    initAction = initActions[newAction["who"]]
+    balance = (newAction["amount"] - initAction["amount"]).to_i;
+    type = newAction["type"];
+    if (balance < 0)
+      if ("debit" == newAction["type"])
+        type = "credit";
+      else
+        type = "debit";
+      end
+    end
+    actions.push({
+      "who" => newAction["who"],  
+      "type" => type,
+      "amount" => balance.abs
+    });
+  end
+  actions;
+end
+
+##
+# Computes the modifications in the billing
+# 
+# param initRental the base data for the initial rental
+# param rentalMod the modifications to apply to a specified rental 
+# param rentalsInfo map of all rentals by their id, including all following fields for each rental: nbDays, pricePerDay, pricePerKm, nbKms, price, commission, options, actions
+# param cars information about cars
+# return the updated rentalsInfo, now containing rental_modifications information
+def computeModifications(initRental, rentalMod, rentalsInfo, cars)
+  initRentalInfo = rentalsInfo["rentals"][rentalMod["rental_id"]];
+  newRental = initRental.merge(rentalMod);
+  newRentalInfo = processRental(newRental, cars);
+  getRentalModActions(initRentalInfo, newRentalInfo);
+end
+
 
 
 
@@ -143,37 +229,31 @@ end
 
 data = readJson("data.json");
 
-# making cars accessible as map (car_id > car)
+# making cars accessible as Hash (car_id > car)
 cars = [];
 for car in data["cars"] do
   cars[car["id"]] = car;
 end
 
-output = {"rentals" => []};
+info = {"rentals" => {}};
 for rental in data["rentals"] do
-  ## extracting rental information
-
-  # both first and last days are billed
-  nbDays = (Date.parse(rental["end_date"]) - Date.parse(rental["start_date"])).to_i + 1; 
-  pricePerDay = cars[rental["car_id"]]["price_per_day"];
-  pricePerKm = cars[rental["car_id"]]["price_per_km"];
-  nbKms = rental["distance"];
-  deductibleOption = rental["deductible_reduction"];
-  
-  ## generating billing information
-  
-  price = getPrice(nbDays, pricePerDay, pricePerKm, nbKms);
-  comm = getCommission(price, nbDays);
-  options = getOptions(nbDays, deductibleOption);
-  actions = getActions(price, comm, options);
-  
-  ## generating the output based on billing computations
-  
-  output["rentals"].push(
-    "id" => rental["id"], 
-    "actions" => actions);
+  rentalInfo = processRental(rental, cars);
+  info["rentals"][rental["id"]] = rentalInfo;
+  # making rentals accessible as Hash (rental_id > rental)
+  data["rentals"][rental["id"]] = rental;
 end
 
+modifs = [];
+for rentalMod in data["rental_modifications"] do
+  modifs.push({
+    "id" => rentalMod["id"],
+    "rental_id" => rentalMod["rental_id"],
+    "actions" => computeModifications(data["rentals"][rentalMod["rental_id"]], rentalMod, info, cars)
+  });
+  
+end
+
+output = {"rental_modifications" => modifs};
 writeJson(output, "myoutput.json");
 
 
