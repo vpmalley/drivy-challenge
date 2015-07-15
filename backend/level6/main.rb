@@ -35,7 +35,8 @@ end
 # 
 # param rental the data specifically about the current rental
 # param cars the data about all available cars
-# return the rentalInfo that was extracted, with members: id, nbDays, pricePerDay, pricePerKm, nbKms, deductibleOption
+# return the rentalInfo that was extracted, with members: 
+#   id, nbDays, pricePerDay, pricePerKm, nbKms, deductibleOption
 def extractRentalInfo(rental, cars)
   rentalInfo = {};
   rentalInfo["id"] = rental["id"]
@@ -56,7 +57,8 @@ end
 
 ##
 # Computes the price for the number of days the price is discounted.
-# Discounts are defined by a dayThreshold ( days after this number are discounted) and a discount (the discount on the pricePerDay, as a number between 0 and 1)
+# Discounts are defined by a dayThreshold (days after this number are discounted) 
+#   and a discount (the discount on the pricePerDay, as a number between 0 and 1)
 #
 # param nbDays the number of days of the rental
 # param pricePerDay the price per day applied to the rental
@@ -103,7 +105,11 @@ def getCommission(price, nbDays)
   commInsurance = comm / 2;
   commRoadside = 100 * nbDays;
   commDrivy = comm - commInsurance - commRoadside;
-  commission = {"insurance_fee" => commInsurance.to_i, "assistance_fee" => commRoadside.to_i, "drivy_fee" => commDrivy.to_i}
+  commission = {
+    "insurance_fee" => commInsurance.to_i,
+    "assistance_fee" => commRoadside.to_i, 
+    "drivy_fee" => commDrivy.to_i
+  }
 end
 
 ##
@@ -160,22 +166,11 @@ def getActions(price, comm, options)
 end
 
 ##
-# Extracts rental data and computes billing
+# Computes the modifications to bill to the different actors for a rental
 #
-# param rental the data specifically about the current rental
-# param cars the data about all available cars
-# return the rentalInfo that was extracted and computed, with members: id, nbDays, pricePerDay, pricePerKm, nbKms, deductibleOption, price, commission, options, actions
-def processRental(rental, cars)
-  rentalInfo = extractRentalInfo(rental, cars);
-  
-  # generating billing information
-  rentalInfo["price"] = getPrice(rentalInfo["nbDays"], rentalInfo["pricePerDay"], rentalInfo["pricePerKm"], rentalInfo["nbKms"]);
-  rentalInfo["commission"] = getCommission(rentalInfo["price"], rentalInfo["nbDays"]);
-  rentalInfo["options"] = getOptions(rentalInfo["nbDays"], rentalInfo["deductibleOption"]);
-  rentalInfo["actions"] = getActions(rentalInfo["price"], rentalInfo["commission"], rentalInfo["options"]);
-  rentalInfo;
-end
-
+# param initRentalInfo the processed information for the initial rental
+# param newRentalInfo the processed information for the rental with modifications
+# return the actions to bill to the different actors
 def getRentalModActions(initRentalInfo, newRentalInfo)
   actions = [];
     
@@ -188,6 +183,7 @@ def getRentalModActions(initRentalInfo, newRentalInfo)
   # comparing the initial actions and the expected new rental, computing the difference
   for newAction in newRentalInfo["actions"]
     initAction = initActions[newAction["who"]]
+    
     balance = (newAction["amount"] - initAction["amount"]).to_i;
     type = newAction["type"];
     if (balance < 0)
@@ -197,6 +193,7 @@ def getRentalModActions(initRentalInfo, newRentalInfo)
         type = "debit";
       end
     end
+    
     actions.push({
       "who" => newAction["who"],  
       "type" => type,
@@ -206,16 +203,35 @@ def getRentalModActions(initRentalInfo, newRentalInfo)
   actions;
 end
 
+
+##
+# Extracts rental data and computes billing
+#
+# param rental the data specifically about the current rental
+# param cars the data about all available cars
+# return the rentalInfo that was extracted and computed, with members: 
+#   id, nbDays, pricePerDay, pricePerKm, nbKms, deductibleOption, price, commission, options, actions
+def processRental(rental, cars)
+  rentalInfo = extractRentalInfo(rental, cars);
+  
+  # generating billing information
+  rentalInfo["price"] = getPrice(rentalInfo["nbDays"], rentalInfo["pricePerDay"], rentalInfo["pricePerKm"], rentalInfo["nbKms"]);
+  rentalInfo["commission"] = getCommission(rentalInfo["price"], rentalInfo["nbDays"]);
+  rentalInfo["options"] = getOptions(rentalInfo["nbDays"], rentalInfo["deductibleOption"]);
+  rentalInfo["actions"] = getActions(rentalInfo["price"], rentalInfo["commission"], rentalInfo["options"]);
+  rentalInfo;
+end
+
 ##
 # Computes the modifications in the billing
 # 
 # param initRental the base data for the initial rental
-# param rentalMod the modifications to apply to a specified rental 
-# param rentalsInfo map of all rentals by their id, including all following fields for each rental: nbDays, pricePerDay, pricePerKm, nbKms, price, commission, options, actions
+# param rentalMod the modifications to base data to apply to the specified rental 
+# param initRentalInfo initial rental processed information, including all following fields for each rental:
+#   nbDays, pricePerDay, pricePerKm, nbKms, price, commission, options, actions
 # param cars information about cars
 # return the updated rentalsInfo, now containing rental_modifications information
-def computeModifications(initRental, rentalMod, rentalsInfo, cars)
-  initRentalInfo = rentalsInfo["rentals"][rentalMod["rental_id"]];
+def processModifications(initRental, rentalMod, initRentalInfo, cars)
   newRental = initRental.merge(rentalMod);
   newRentalInfo = processRental(newRental, cars);
   getRentalModActions(initRentalInfo, newRentalInfo);
@@ -234,26 +250,31 @@ cars = [];
 for car in data["cars"] do
   cars[car["id"]] = car;
 end
-
-info = {"rentals" => {}};
+# making rentals accessible as Hash (rental_id > rental)
+rentals = [];
 for rental in data["rentals"] do
-  rentalInfo = processRental(rental, cars);
-  info["rentals"][rental["id"]] = rentalInfo;
-  # making rentals accessible as Hash (rental_id > rental)
-  data["rentals"][rental["id"]] = rental;
+  rentals[rental["id"]] = rental;
 end
 
-modifs = [];
+
+processedRentals = {};
+for rental in data["rentals"] do
+  rentalInfo = processRental(rental, cars);
+  processedRentals[rental["id"]] = rentalInfo;
+end
+
+processedModifs = [];
 for rentalMod in data["rental_modifications"] do
-  modifs.push({
+  rentalId = rentalMod["rental_id"];
+  processedModifs.push({
     "id" => rentalMod["id"],
-    "rental_id" => rentalMod["rental_id"],
-    "actions" => computeModifications(data["rentals"][rentalMod["rental_id"]], rentalMod, info, cars)
+    "rental_id" => rentalId,
+    "actions" => processModifications(rentals[rentalId], rentalMod, processedRentals[rentalId], cars)
   });
   
 end
 
-output = {"rental_modifications" => modifs};
+output = {"rental_modifications" => processedModifs};
 writeJson(output, "myoutput.json");
 
 
