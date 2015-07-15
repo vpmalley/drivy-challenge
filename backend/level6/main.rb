@@ -33,7 +33,7 @@ end
 ##
 # Extracts the information from the rental and cars data to prepare for billing
 # 
-# param rental the data specifically about the current rental
+# param rental the data about the current rental
 # param cars the data about all available cars
 # return the rentalInfo that was extracted, with members: 
 #   id, nbDays, pricePerDay, pricePerKm, nbKms, deductibleOption
@@ -77,6 +77,7 @@ end
 # param pricePerDay the price per rental (cents)
 # param pricePerKm the price per km during the rental (cents)
 # param nbKms the distance during the rental
+# return the price of a rental as an integer, in cents
 def getPrice(nbDays, pricePerDay, pricePerKm, nbKms)
   price = nbKms * pricePerKm;
   
@@ -96,10 +97,12 @@ def getPrice(nbDays, pricePerDay, pricePerKm, nbKms)
 end
 
 ##
-# Computes the commission for each contributor based on the price
+# Computes the commission for each contributor
 #
 # param price the price of a rental
 # param nbDays the number of days of the rental
+# return the commissions, as a Hash containing the following fields:
+#   insurance_fee, assistance_fee, drivy_fee
 def getCommission(price, nbDays)
   comm = 0.3 * price;
   commInsurance = comm / 2;
@@ -117,6 +120,7 @@ end
 #
 # param nbDays the number of days of the rental
 # param deductibleOption whether the customer opted in for a reduced deductible in case of accident
+# return the options and the corresponding billed amount
 def getOptions(nbDays, deductibleOption)
   # deductible reduction option
   deductibleReduction = 0;
@@ -134,7 +138,8 @@ end
 # param price the price of the rental, without the options
 # param comm the multiple commissions: insurance_fee, assistance_fee, drivy_fee
 # param options the options: deductible_reduction
-# return a list of bank transactions, with information: who, type, amount
+# return a list of bank transactions, with fields: 
+#   who, type, amount
 def getActions(price, comm, options)
   actions = [];
   # driver
@@ -230,7 +235,8 @@ end
 # param initRentalInfo initial rental processed information, including all following fields for each rental:
 #   nbDays, pricePerDay, pricePerKm, nbKms, price, commission, options, actions
 # param cars information about cars
-# return the updated rentalsInfo, now containing rental_modifications information
+# return the list of actions to bill to the actors, each containing the fields:
+#   who, type, amount
 def processModifications(initRental, rentalMod, initRentalInfo, cars)
   newRental = initRental.merge(rentalMod);
   newRentalInfo = processRental(newRental, cars);
@@ -245,24 +251,25 @@ end
 
 data = readJson("data.json");
 
-# making cars accessible as Hash (car_id > car)
+# making cars accessible as Hash (car_id => car)
 cars = [];
 for car in data["cars"] do
   cars[car["id"]] = car;
 end
-# making rentals accessible as Hash (rental_id > rental)
+# making rentals accessible as Hash (rental_id => rental)
 rentals = [];
 for rental in data["rentals"] do
   rentals[rental["id"]] = rental;
 end
 
-
+# processing rentals
 processedRentals = {};
 for rental in data["rentals"] do
   rentalInfo = processRental(rental, cars);
   processedRentals[rental["id"]] = rentalInfo;
 end
 
+# processing rental modifications
 processedModifs = [];
 for rentalMod in data["rental_modifications"] do
   rentalId = rentalMod["rental_id"];
@@ -274,6 +281,7 @@ for rentalMod in data["rental_modifications"] do
   
 end
 
+# outputting rental modifications
 output = {"rental_modifications" => processedModifs};
 writeJson(output, "myoutput.json");
 
